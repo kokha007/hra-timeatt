@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ระบบลงเวลาเข้า-ออก LIFF</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+        .btn {
+            @apply px-6 py-3 rounded-xl font-semibold text-white shadow-lg transition-all duration-300 ease-in-out hover:scale-105;
+        }
+        .btn-checkin {
+            @apply bg-green-600 hover:bg-green-700;
+        }
+        .btn-checkout {
+            @apply bg-red-600 hover:bg-red-700;
+        }
+        .loader {
+            border: 4px solid #f3f3f3; /* Light grey */
+            border-top: 4px solid #3498db; /* Blue */
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 2s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen flex items-center justify-center p-4">
+    <div class="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md text-center">
+        <h1 class="text-3xl font-bold text-gray-800 mb-6">ระบบลงเวลาเข้า-ออก</h1>
+
+        <div id="loading" class="flex items-center justify-center text-gray-600 mb-6">
+            <div class="loader mr-3"></div>
+            <p>กำลังโหลด LIFF App...</p>
+        </div>
+
+        <div id="app-content" class="hidden">
+            <div class="flex flex-col items-center mb-6">
+                <img id="profile-picture" class="w-24 h-24 rounded-full mb-3 shadow-md" src="https://placehold.co/96x96/cccccc/333333?text=Profile" alt="Profile Picture">
+                <p id="user-name" class="text-xl font-semibold text-gray-700">กำลังโหลดชื่อ...</p>
+                <p id="user-id" class="text-sm text-gray-500 break-all mt-1">ID: Loading...</p>
+            </div>
+
+            <div class="mb-6 text-gray-600">
+                <p id="current-datetime" class="text-lg font-medium">Loading Date & Time...</p>
+                <p id="location-info" class="text-md text-gray-500 mt-2">Location: Not available</p>
+            </div>
+
+            <div class="flex flex-col space-y-4 mb-6">
+                <button id="checkin-btn" class="btn btn-checkin" disabled>
+                    <span id="checkin-text">เข้างาน</span>
+                    <span id="checkin-spinner" class="loader ml-2 hidden"></span>
+                </button>
+                <button id="checkout-btn" class="btn btn-checkout" disabled>
+                    <span id="checkout-text">ออกงาน</span>
+                    <span id="checkout-spinner" class="loader ml-2 hidden"></span>
+                </button>
+            </div>
+
+            <p id="status-message" class="text-sm text-gray-700 mt-4 h-6"></p>
+        </div>
+    </div>
+
+    <!-- LIFF SDK -->
+    <script src="https://static.line-scdn.net/liff/sdk/v2/liff.js"></script>
+    <script>
+        // **สำคัญ: แทนที่ด้วย LIFF ID ของคุณ**
+        const LIFF_ID = "YOUR_LIFF_ID";
+        // **สำคัญ: แทนที่ด้วย Web App URL ของ Google Apps Script ที่ Deploy แล้ว (ต้องลงท้ายด้วย /exec)**
+        const APPS_SCRIPT_WEB_APP_URL = "YOUR_APPS_SCRIPT_WEB_APP_URL";
+
+        // Elements from HTML
+        const loadingDiv = document.getElementById('loading');
+        const appContentDiv = document.getElementById('app-content');
+        const profilePicture = document.getElementById('profile-picture');
+        const userNameElem = document.getElementById('user-name');
+        const userIdElem = document.getElementById('user-id');
+        const currentDatetimeElem = document.getElementById('current-datetime');
+        const locationInfoElem = document.getElementById('location-info');
+        const checkinBtn = document.getElementById('checkin-btn');
+        const checkoutBtn = document.getElementById('checkout-btn');
+        const statusMessageElem = document.getElementById('status-message');
+        const checkinText = document.getElementById('checkin-text');
+        const checkinSpinner = document.getElementById('checkin-spinner');
+        const checkoutText = document.getElementById('checkout-text');
+        const checkoutSpinner = document.getElementById('checkout-spinner');
+
+        let currentUserProfile = null;
+        let currentLocation = null;
+
+        // ฟังก์ชันสำหรับจัดรูปแบบวันที่และเวลา
+        function formatDateTime(date) {
+            const options = {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: false
+            };
+            return new Date(date).toLocaleString('th-TH', options);
+        }
+
+        // อัปเดตการแสดงผลวันที่และเวลาปัจจุบันทุกวินาที
+        setInterval(() => {
+            currentDatetimeElem.textContent = formatDateTime(new Date());
+        }, 1000);
+
+        // เริ่มต้นการทำงานของ LIFF App
+        async function initializeLiff() {
+            try {
+                // เริ่มต้น LIFF ด้วย LIFF ID ที่กำหนด
+                await liff.init({ liffId: LIFF_ID });
+                // ซ่อนส่วนโหลดและแสดงเนื้อหาแอป
+                loadingDiv.classList.add('hidden');
+                appContentDiv.classList.remove('hidden');
+
+                // ตรวจสอบว่าผู้ใช้เข้าสู่ระบบ LINE แล้วหรือยัง
+                if (liff.isLoggedIn()) {
+                    await getUserProfile(); // ดึงข้อมูลโปรไฟล์ผู้ใช้
+                    await getLocation();    // ดึงข้อมูลตำแหน่ง
+                    // เปิดใช้งานปุ่มเมื่อ LIFF พร้อมใช้งาน
+                    checkinBtn.disabled = false;
+                    checkoutBtn.disabled = false;
+                } else {
+                    // ถ้ายังไม่ได้เข้าสู่ระบบ ให้แสดงข้อความและให้ผู้ใช้เข้าสู่ระบบ LINE
+                    statusMessageElem.textContent = "กรุณาเข้าสู่ระบบ LINE เพื่อใช้งาน";
+                    liff.login();
+                }
+            } catch (err) {
+                // จัดการข้อผิดพลาดในการเริ่มต้น LIFF
+                console.error('LIFF initialization failed', err);
+                loadingDiv.classList.add('hidden');
+                statusMessageElem.textContent = `เกิดข้อผิดพลาดในการโหลด LIFF: ${err.message}. ลองเปิดใหม่ใน LINE App.`;
+            }
+        }
+
+        // ดึงข้อมูลโปรไฟล์ผู้ใช้ LINE
+        async function getUserProfile() {
+            try {
+                currentUserProfile = await liff.getProfile();
+                profilePicture.src = currentUserProfile.pictureUrl || "https://placehold.co/96x96/cccccc/333333?text=Profile";
+                userNameElem.textContent = currentUserProfile.displayName;
+                userIdElem.textContent = `ID: ${currentUserProfile.userId}`;
+
+                // ตรวจสอบสถานะการเป็นเพื่อน (ไม่บังคับ แต่แนะนำ)
+                const friendship = await liff.getFriendship();
+                if (!friendship.friendFlag) {
+                    statusMessageElem.textContent = "กรุณาเพิ่ม LINE OA ของเราเป็นเพื่อน เพื่อรับการแจ้งเตือนและการใช้งานเต็มรูปแบบ";
+                }
+            } catch (err) {
+                console.error('Failed to get user profile', err);
+                statusMessageElem.textContent = `ไม่สามารถดึงข้อมูลผู้ใช้ได้: ${err.message}`;
+            }
+        }
+
+        // ดึงข้อมูลตำแหน่งปัจจุบันของผู้ใช้
+        async function getLocation() {
+            try {
+                // ขออนุญาตและดึงตำแหน่ง
+                currentLocation = await liff.getGeolocation();
+                locationInfoElem.textContent = `Location: ${currentLocation.latitude.toFixed(4)}, ${currentLocation.longitude.toFixed(4)}`;
+            } catch (err) {
+                console.warn('Failed to get location', err);
+                if (err.code === 1) { // PERMISSION_DENIED
+                    locationInfoElem.textContent = "Location: ไม่ได้รับอนุญาต (โปรดเปิดใช้งานตำแหน่งในเครื่อง)";
+                } else {
+                    locationInfoElem.textContent = `Location: ไม่สามารถระบุได้ (${err.message})`;
+                }
+                currentLocation = null; // เคลียร์ข้อมูลตำแหน่งหากดึงไม่สำเร็จ
+            }
+        }
+
+        // ส่งข้อมูลการลงเวลาไปยัง Google Apps Script
+        async function sendAttendanceData(status) {
+            if (!currentUserProfile) {
+                statusMessageElem.textContent = "ไม่พบข้อมูลผู้ใช้ LIFF กรุณาลองโหลดแอปใหม่";
+                return;
+            }
+
+            // แสดง spinner โหลดและปิดการใช้งานปุ่มชั่วคราว
+            if (status === 'เข้างาน') {
+                checkinText.classList.add('hidden');
+                checkinSpinner.classList.remove('hidden');
+                checkinBtn.disabled = true;
+            } else {
+                checkoutText.classList.add('hidden');
+                checkoutSpinner.classList.remove('hidden');
+                checkoutBtn.disabled = true;
+            }
+            statusMessageElem.textContent = "กำลังส่งข้อมูล...";
+
+            // เตรียมข้อมูล Payload ที่จะส่งไปยัง Apps Script
+            const payload = {
+                type: "liff_action", // กำหนดประเภท payload เพื่อให้ Apps Script แยกแยะได้
+                userId: currentUserProfile.userId,
+                userName: currentUserProfile.displayName,
+                status: status,
+                latitude: currentLocation ? currentLocation.latitude : null,
+                longitude: currentLocation ? currentLocation.longitude : null
+            };
+
+            try {
+                // ส่งข้อมูล POST ไปยัง Web App URL ของ Apps Script
+                const response = await fetch(APPS_SCRIPT_WEB_APP_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+                if (result.status === 'success') {
+                    statusMessageElem.textContent = `✅ ${result.message}`;
+                } else {
+                    statusMessageElem.textContent = `❌ เกิดข้อผิดพลาด: ${result.message}`;
+                }
+            } catch (error) {
+                console.error('Error sending data to Apps Script:', error);
+                statusMessageElem.textContent = `❌ การส่งข้อมูลล้มเหลว: ${error.message}`;
+            } finally {
+                // ซ่อน spinner โหลดและเปิดใช้งานปุ่มอีกครั้ง
+                if (status === 'เข้างาน') {
+                    checkinText.classList.remove('hidden');
+                    checkinSpinner.classList.add('hidden');
+                } else {
+                    checkoutText.classList.remove('hidden');
+                    checkoutSpinner.classList.add('hidden');
+                }
+                checkinBtn.disabled = false;
+                checkoutBtn.disabled = false;
+            }
+        }
+
+        // เพิ่ม Event Listeners ให้กับปุ่ม
+        checkinBtn.addEventListener('click', () => sendAttendanceData('เข้างาน'));
+        checkoutBtn.addEventListener('click', () => sendAttendanceData('ออกงาน'));
+
+        // เริ่มต้นการทำงานของ LIFF เมื่อ DOM โหลดเสร็จสมบูรณ์
+        document.addEventListener('DOMContentLoaded', initializeLiff);
+    </script>
+</body>
+</html>
